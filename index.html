@@ -21,7 +21,7 @@ h1{font-size:18px;font-weight:500;margin-bottom:1rem;color:#ccc;text-align:cente
 .vib-ring{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end;}
 .vib-bar{width:5px;background:#D4537E;border-radius:3px;min-height:4px;}
 .status-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);border-radius:20px;padding:5px 14px;font-size:12px;white-space:nowrap;}
-.sound-dot{position:absolute;top:12px;right:14px;width:9px;height:9px;border-radius:50%;background:#333;}
+.sound-dot{position:absolute;top:12px;right:14px;width:9px;height:9px;border-radius:50%;background:#333;transition:background 0.2s;}
 .sound-dot.on{background:#1D9E75;}
 .info-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;max-width:700px;margin:0 auto 1rem;}
 .info-card{background:#1a1a1a;border:0.5px solid #333;border-radius:10px;padding:10px;text-align:center;}
@@ -71,8 +71,8 @@ h1{font-size:18px;font-weight:500;margin-bottom:1rem;color:#ccc;text-align:cente
 <div class="guide">
   <div class="guide-row"><span class="badge badge-l">왼손</span> 위로 올리면 볼륨 크게 — 아래로 내리면 작게</div>
   <div class="guide-row"><span class="badge badge-r">오른손</span> 위로 올리면 음이 높아짐 (C2~C6) — 아래로 내리면 낮아짐</div>
-  <div class="guide-row"><span class="badge badge-r">오른손</span> 활짝 펼치면 비브라토(진동) 효과 강해짐 — 오므리면 약해짐</div>
-  <div class="guide-row" style="color:#555;font-size:12px;">손이 감지되면 소리가 켜지고, 손을 내리면 0.4초 후 꺼져요</div>
+  <div class="guide-row"><span class="badge badge-r">오른손</span> 활짝 펼치면 비브라토(진동) 강해짐 — 오므리면 약해짐</div>
+  <div class="guide-row" style="color:#555;font-size:12px;">손이 감지되면 소리 켜짐 — 손을 내리면 0.4초 후 꺼짐 (우측 상단 초록 점)</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -81,44 +81,19 @@ h1{font-size:18px;font-weight:500;margin-bottom:1rem;color:#ccc;text-align:cente
 const NOTES=['C2','D2','E2','G2','A2','C3','D3','E3','G3','A3','C4','D4','E4','G4','A4','C5','D5','E5','G5','A5','C6'];
 const FREQS=[65.4,73.4,82.4,98,110,130.8,146.8,164.8,196,220,261.6,293.7,329.6,392,440,523.3,587.3,659.3,784,880,1046.5];
 
+// ── Audio ──────────────────────────────────────────
 let audioCtx=null,oscMain=null,oscSub=null,gainNode=null,lfoOsc=null,lfoGain=null,filterNode=null;
 let soundActive=false,silenceTimer=null;
-let volume=60,pitch=50,vibration=50;
-let animPhase=0,vibBars=[];
-
-const vibRing=document.getElementById('vibRing');
-const soundDot=document.getElementById('soundDot');
-for(let i=0;i<20;i++){
-  const b=document.createElement('div');
-  b.className='vib-bar';b.style.height='4px';
-  vibRing.appendChild(b);vibBars.push(b);
-}
-
-function animVib(){
-  animPhase+=0.12;
-  vibBars.forEach((b,i)=>{
-    const wave=Math.sin(animPhase*3+i*0.6)*0.5+0.5;
-    b.style.height=Math.round(4+wave*(vibration/100)*44)+'px';
-  });
-  requestAnimationFrame(animVib);
-}
-animVib();
 
 function initAudio(){
   if(audioCtx)return;
   audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-
-  // 메인 오실레이터 — 사인파 (부드러운 신디 음)
   oscMain=audioCtx.createOscillator();
   oscMain.type='sine';
   oscMain.frequency.value=261.6;
-
-  // 서브 오실레이터 — 트라이앵글 옥타브 아래 (두께감)
   oscSub=audioCtx.createOscillator();
   oscSub.type='triangle';
   oscSub.frequency.value=130.8;
-
-  // LFO — 비브라토
   lfoOsc=audioCtx.createOscillator();
   lfoOsc.type='sine';
   lfoOsc.frequency.value=5.5;
@@ -126,48 +101,53 @@ function initAudio(){
   lfoGain.gain.value=0;
   lfoOsc.connect(lfoGain);
   lfoGain.connect(oscMain.frequency);
-
-  // 로우패스 필터
   filterNode=audioCtx.createBiquadFilter();
   filterNode.type='lowpass';
   filterNode.frequency.value=2000;
   filterNode.Q.value=1.2;
-
-  // 메인 게인
   gainNode=audioCtx.createGain();
   gainNode.gain.value=0;
-
   oscMain.connect(filterNode);
   oscSub.connect(filterNode);
   filterNode.connect(gainNode);
   gainNode.connect(audioCtx.destination);
-
   oscMain.start();oscSub.start();lfoOsc.start();
 }
 
-function getFreq(p){
-  const idx=Math.round((p/100)*(FREQS.length-1));
-  return FREQS[Math.min(Math.max(idx,0),FREQS.length-1)];
-}
-function getNoteLabel(p){
-  const idx=Math.round((p/100)*(NOTES.length-1));
-  return NOTES[Math.min(Math.max(idx,0),NOTES.length-1)];
-}
-
-function updateAudio(){
+function updateAudio(vol,pit,vib){
   if(!audioCtx)return;
   const now=audioCtx.currentTime;
-  const freq=getFreq(pitch);
+  const freq=FREQS[Math.round((pit/100)*(FREQS.length-1))];
   oscMain.frequency.setTargetAtTime(freq,now,0.05);
   oscSub.frequency.setTargetAtTime(freq/2,now,0.05);
-  const vol=soundActive?(volume/100)*0.55:0;
-  gainNode.gain.setTargetAtTime(vol,now,0.08);
-  const vibDepth=(vibration/100)*freq*0.04;
-  lfoGain.gain.setTargetAtTime(vibDepth,now,0.05);
+  gainNode.gain.setTargetAtTime(soundActive?(vol/100)*0.55:0,now,0.08);
+  lfoGain.gain.setTargetAtTime((vib/100)*freq*0.04,now,0.05);
   filterNode.frequency.setTargetAtTime(400+freq*3,now,0.05);
-  soundDot.className='sound-dot'+(soundActive?' on':'');
+  document.getElementById('soundDot').className='sound-dot'+(soundActive?' on':'');
 }
 
+// ── UI / Visual ───────────────────────────────────
+let volume=60,pitch=50,vibration=50,animPhase=0;
+const vibBars=[];
+const vibRing=document.getElementById('vibRing');
+for(let i=0;i<20;i++){
+  const b=document.createElement('div');
+  b.className='vib-bar';b.style.height='4px';
+  vibRing.appendChild(b);vibBars.push(b);
+}
+function animVib(){
+  animPhase+=0.12;
+  vibBars.forEach((b,i)=>{
+    const w=Math.sin(animPhase*3+i*0.6)*0.5+0.5;
+    b.style.height=Math.round(4+w*(vibration/100)*44)+'px';
+  });
+  requestAnimationFrame(animVib);
+}
+animVib();
+
+function getNoteLabel(p){
+  return NOTES[Math.round((p/100)*(NOTES.length-1))];
+}
 function updateUI(){
   document.getElementById('volFill').style.height=volume+'%';
   document.getElementById('volVal').textContent=Math.round(volume);
@@ -177,7 +157,6 @@ function updateUI(){
   document.getElementById('cardPitch').textContent=getNoteLabel(pitch);
   document.getElementById('cardVib').textContent=Math.round(vibration)+'%';
 }
-
 function getSpread(lm){
   const w=lm[0];let max=0;
   [4,8,12,16,20].forEach(i=>{
@@ -186,24 +165,17 @@ function getSpread(lm){
   });
   return Math.min(max*3,1);
 }
-
 function drawHand(lm,color){
   const W=overlayCanvas.width,H=overlayCanvas.height;
   const conn=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
   ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineCap='round';
-  conn.forEach(([a,b])=>{
-    ctx.beginPath();ctx.moveTo(lm[a].x*W,lm[a].y*H);ctx.lineTo(lm[b].x*W,lm[b].y*H);ctx.stroke();
-  });
-  lm.forEach((p,i)=>{
-    ctx.beginPath();ctx.arc(p.x*W,p.y*H,i===0?7:4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
-  });
+  conn.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(lm[a].x*W,lm[a].y*H);ctx.lineTo(lm[b].x*W,lm[b].y*H);ctx.stroke();});
+  lm.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x*W,p.y*H,i===0?7:4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();});
 }
-
 function lerp(a,b,t){return a+(b-a)*t;}
 
+// ── Camera ────────────────────────────────────────
 const startBtn=document.getElementById('startBtn');
-const mainStage=document.getElementById('mainStage');
-const infoRow=document.getElementById('infoRow');
 const camVideo=document.getElementById('camVideo');
 const overlayCanvas=document.getElementById('overlayCanvas');
 const ctx=overlayCanvas.getContext('2d');
@@ -211,69 +183,71 @@ const ctx=overlayCanvas.getContext('2d');
 startBtn.addEventListener('click',async()=>{
   startBtn.textContent='연결 중...';
   startBtn.disabled=true;
+  initAudio();
+
+  // 처음 카메라가 됐던 버전과 동일한 방식 — constraints 최소화
+  let stream;
   try{
-    initAudio();
-    const stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720}}});
-    camVideo.srcObject=stream;
-    await camVideo.play();
-    mainStage.style.display='block';
-    infoRow.style.display='grid';
-    startBtn.style.display='none';
-
-    const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
-
-    hands.onResults(results=>{
-      overlayCanvas.width=camVideo.videoWidth||640;
-      overlayCanvas.height=camVideo.videoHeight||480;
-      ctx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
-      const statusBar=document.getElementById('statusBar');
-
-      if(!results.multiHandLandmarks||results.multiHandLandmarks.length===0){
-        statusBar.textContent='손을 카메라에 보여주세요';
-        if(soundActive&&!silenceTimer){
-          silenceTimer=setTimeout(()=>{
-            soundActive=false;updateAudio();silenceTimer=null;
-          },400);
-        }
-        return;
-      }
-
-      if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
-      soundActive=true;
-
-      let parts=[];
-      results.multiHandLandmarks.forEach((lm,idx)=>{
-        const label=results.multiHandedness[idx].label;
-        const wristY=lm[0].y;
-        if(label==='Left'){
-          // 미러링: Left = 오른손
-          drawHand(lm,'#9FE1CB');
-          pitch=Math.round(lerp(pitch,Math.min(Math.max((1-wristY)*100,0),100),0.2));
-          vibration=Math.round(lerp(vibration,getSpread(lm)*100,0.2));
-          parts.push('오른손 — 음역대·진동');
-        } else {
-          drawHand(lm,'#CECBF6');
-          volume=Math.round(lerp(volume,Math.min(Math.max((1-wristY)*100,0),100),0.2));
-          parts.push('왼손 — 볼륨');
-        }
-      });
-
-      statusBar.textContent=parts.join('  |  ');
-      updateAudio();
-      updateUI();
-    });
-
-    const camera=new Camera(camVideo,{
-      onFrame:async()=>{await hands.send({image:camVideo});},
-      width:1280,height:720
-    });
-    camera.start();
+    stream=await navigator.mediaDevices.getUserMedia({video:true});
   }catch(e){
     startBtn.disabled=false;
     startBtn.textContent='카메라 접근 실패 — 다시 시도';
-    console.error(e);
+    alert('카메라 권한을 허용해 주세요.\n\n오류: '+e.message);
+    return;
   }
+
+  camVideo.srcObject=stream;
+  await camVideo.play();
+  document.getElementById('mainStage').style.display='block';
+  document.getElementById('infoRow').style.display='grid';
+  startBtn.style.display='none';
+
+  const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
+
+  hands.onResults(results=>{
+    overlayCanvas.width=camVideo.videoWidth||640;
+    overlayCanvas.height=camVideo.videoHeight||480;
+    ctx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+    const statusBar=document.getElementById('statusBar');
+
+    if(!results.multiHandLandmarks||results.multiHandLandmarks.length===0){
+      statusBar.textContent='손을 카메라에 보여주세요';
+      if(soundActive&&!silenceTimer){
+        silenceTimer=setTimeout(()=>{soundActive=false;updateAudio(volume,pitch,vibration);silenceTimer=null;},400);
+      }
+      return;
+    }
+
+    if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
+    soundActive=true;
+
+    let parts=[];
+    results.multiHandLandmarks.forEach((lm,idx)=>{
+      const label=results.multiHandedness[idx].label;
+      const wristY=lm[0].y;
+      if(label==='Left'){
+        drawHand(lm,'#9FE1CB');
+        pitch=Math.round(lerp(pitch,Math.min(Math.max((1-wristY)*100,0),100),0.2));
+        vibration=Math.round(lerp(vibration,getSpread(lm)*100,0.2));
+        parts.push('오른손 — 음역대·진동');
+      }else{
+        drawHand(lm,'#CECBF6');
+        volume=Math.round(lerp(volume,Math.min(Math.max((1-wristY)*100,0),100),0.2));
+        parts.push('왼손 — 볼륨');
+      }
+    });
+
+    statusBar.textContent=parts.join('  |  ');
+    updateAudio(volume,pitch,vibration);
+    updateUI();
+  });
+
+  const camera=new Camera(camVideo,{
+    onFrame:async()=>{await hands.send({image:camVideo});},
+    width:1280,height:720
+  });
+  camera.start();
 });
 </script>
 </body>
