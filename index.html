@@ -8,17 +8,13 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:system-ui,sans-serif;background:#0d0d0d;color:#fff;min-height:100vh;padding:1rem;}
 h1{font-size:18px;font-weight:500;margin-bottom:0.75rem;color:#ccc;text-align:center;}
-
-/* 악기 선택 */
 .instrument-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;max-width:700px;margin:0 auto 0.75rem;}
 .inst-btn{padding:7px 14px;font-size:12px;font-weight:500;border:0.5px solid #444;border-radius:20px;background:#1a1a1a;color:#aaa;cursor:pointer;transition:all 0.15s;}
 .inst-btn.active{background:#534AB7;color:#fff;border-color:#534AB7;}
-
-/* 음계 전환 */
+.inst-btn:disabled{opacity:0.4;cursor:wait;}
 .scale-row{display:flex;gap:6px;justify-content:center;max-width:700px;margin:0 auto 0.75rem;}
 .scale-btn{padding:6px 18px;font-size:12px;font-weight:500;border:0.5px solid #444;border-radius:20px;background:#1a1a1a;color:#aaa;cursor:pointer;transition:all 0.15s;}
 .scale-btn.active{background:#1D9E75;color:#fff;border-color:#1D9E75;}
-
 .stage{position:relative;width:100%;max-width:700px;margin:0 auto;aspect-ratio:4/3;background:#111;border-radius:12px;overflow:hidden;margin-bottom:1rem;}
 #camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.85;}
 #overlayCanvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);}
@@ -35,7 +31,7 @@ h1{font-size:18px;font-weight:500;margin-bottom:0.75rem;color:#ccc;text-align:ce
 .sound-dot{position:absolute;top:12px;right:14px;width:9px;height:9px;border-radius:50%;background:#333;transition:background 0.2s;}
 .sound-dot.on{background:#1D9E75;}
 .inst-label{position:absolute;bottom:12px;right:14px;font-size:11px;color:rgba(255,255,255,0.5);}
-
+.load-bar{position:absolute;bottom:0;left:0;height:3px;background:#534AB7;width:0%;transition:width 0.3s;border-radius:0 0 12px 12px;}
 .info-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;max-width:700px;margin:0 auto 1rem;}
 .info-card{background:#1a1a1a;border:0.5px solid #333;border-radius:10px;padding:10px;text-align:center;}
 .info-card .lbl{font-size:11px;color:#888;margin-bottom:4px;}
@@ -54,19 +50,16 @@ h1{font-size:18px;font-weight:500;margin-bottom:0.75rem;color:#ccc;text-align:ce
 <body>
 <h1>비주얼 DJ — 손 제스처 컨트롤</h1>
 
-<!-- 악기 선택 -->
 <div class="instrument-row" id="instRow">
   <button class="inst-btn active" data-inst="danso">🎋 단소</button>
-  <button class="inst-btn" data-inst="synth">🎹 신디</button>
   <button class="inst-btn" data-inst="piano">🎹 피아노</button>
-  <button class="inst-btn" data-inst="flute">🪈 플루트</button>
   <button class="inst-btn" data-inst="violin">🎻 바이올린</button>
-  <button class="inst-btn" data-inst="organ">🎺 오르간</button>
-  <button class="inst-btn" data-inst="bell">🔔 벨</button>
+  <button class="inst-btn" data-inst="flute">🪈 플루트</button>
+  <button class="inst-btn" data-inst="cello">🎻 첼로</button>
   <button class="inst-btn" data-inst="guitar">🎸 기타</button>
+  <button class="inst-btn" data-inst="organ">🎺 오르간</button>
 </div>
 
-<!-- 음계 선택 -->
 <div class="scale-row">
   <button class="scale-btn active" data-scale="korean">국악 음계</button>
   <button class="scale-btn" data-scale="western">서양 음계</button>
@@ -93,6 +86,7 @@ h1{font-size:18px;font-weight:500;margin-bottom:0.75rem;color:#ccc;text-align:ce
   <div class="status-bar" id="statusBar">손을 카메라에 보여주세요</div>
   <div class="sound-dot" id="soundDot"></div>
   <div class="inst-label" id="instLabel">단소 · 국악</div>
+  <div class="load-bar" id="loadBar"></div>
 </div>
 
 <div class="info-row" id="infoRow" style="display:none;">
@@ -105,249 +99,223 @@ h1{font-size:18px;font-weight:500;margin-bottom:0.75rem;color:#ccc;text-align:ce
   <div class="guide-row"><span class="badge badge-l">왼손</span> 위로 올리면 볼륨 크게 — 아래로 내리면 작게</div>
   <div class="guide-row"><span class="badge badge-r">오른손</span> 위로 올리면 음이 높아짐 — 아래로 내리면 낮아짐</div>
   <div class="guide-row"><span class="badge badge-r">오른손</span> 활짝 펼치면 비브라토 강해짐 — 오므리면 약해짐</div>
-  <div class="guide-row" style="color:#555;font-size:12px;">악기·음계는 상단 버튼으로 언제든 바꿀 수 있어요</div>
+  <div class="guide-row" style="color:#555;font-size:12px;">악기 첫 선택 시 샘플 로딩 (1~3초) 후 소리 남 · 단소는 즉시 재생</div>
 </div>
 
+<!-- Tone.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script>
-// ── 음계 정의 ─────────────────────────────────────
+// ── 음계 ────────────────────────────────────────────
 const SCALES = {
   korean: {
-    labels: ['청황','황','태','협','고','중','유','임','이','남','무','응','청황2','청태','청중','청임'],
-    freqs:  [281.6, 295.0, 332.2, 352.0, 374.0, 396.0, 420.0, 444.0, 471.0, 498.0, 528.0, 559.0, 592.0, 664.4, 792.0, 888.0]
+    labels:['청황','황','태','협','고','중','유','임','이','남','무','응','청황2','청태','청중','청임'],
+    notes: ['D4','Eb4','F4','F#4','G4','Ab4','Bb4','B4','C5','Db5','D5','Eb5','F5','F#5','Ab5','B5']
   },
   western: {
-    labels: ['C2','D2','E2','G2','A2','C3','D3','E3','G3','A3','C4','D4','E4','G4','A4','C5','D5','E5','G5','A5','C6'],
-    freqs:  [65.4,73.4,82.4,98,110,130.8,146.8,164.8,196,220,261.6,293.7,329.6,392,440,523.3,587.3,659.3,784,880,1046.5]
+    labels:['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5'],
+    notes: ['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5']
   }
 };
+let currentScale='korean', currentInst='danso';
 
-let currentScale = 'korean';
-let currentInst  = 'danso';
-
-function getScaleFreqs(){ return SCALES[currentScale].freqs; }
-function getScaleLabels(){ return SCALES[currentScale].labels; }
-function getFreqAt(pct){
-  const arr=getScaleFreqs();
+function getNoteAt(pct){
+  const arr=SCALES[currentScale].notes;
   return arr[Math.min(Math.max(Math.round((pct/100)*(arr.length-1)),0),arr.length-1)];
 }
 function getLabelAt(pct){
-  const arr=getScaleLabels();
+  const arr=SCALES[currentScale].labels;
   return arr[Math.min(Math.max(Math.round((pct/100)*(arr.length-1)),0),arr.length-1)];
 }
 
-// ── 악기 음색 엔진 ────────────────────────────────
-let audioCtx=null;
-// 공유 노드
-let gainNode=null, lfoOsc=null, lfoGain=null;
-// 악기별 노드 (매 변경마다 재생성)
-let instNodes=[];
-let soundActive=false, silenceTimer=null;
+// ── Tone.js 샘플러 캐시 ──────────────────────────────
+const samplerCache={};
+let activeSampler=null;
+let dansoNodes=null; // 단소 전용 Web Audio 노드
 
-function initAudio(){
-  if(audioCtx)return;
-  audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  gainNode=audioCtx.createGain();
-  gainNode.gain.value=0;
-  gainNode.connect(audioCtx.destination);
-  lfoOsc=audioCtx.createOscillator();
-  lfoOsc.type='sine';
-  lfoOsc.frequency.value=5.5;
-  lfoGain=audioCtx.createGain();
-  lfoGain.gain.value=0;
-  lfoOsc.connect(lfoGain);
-  lfoOsc.start();
-  buildInstrument(currentInst);
-}
-
-function clearInstrument(){
-  instNodes.forEach(n=>{try{n.stop&&n.stop();n.disconnect();}catch(e){}});
-  instNodes=[];
-}
-
-function buildInstrument(inst){
-  if(!audioCtx)return;
-  clearInstrument();
-  const now=audioCtx.currentTime;
-
-  if(inst==='danso'){
-    // 단소: 바람소리(노이즈) + 고배음 플루트 계열
-    const osc1=audioCtx.createOscillator();
-    osc1.type='sine'; osc1.frequency.value=530;
-    const osc2=audioCtx.createOscillator();
-    osc2.type='sine'; osc2.frequency.value=1060; // 2배음
-    const osc3=audioCtx.createOscillator();
-    osc3.type='sine'; osc3.frequency.value=1590; // 3배음 약하게
-    const g2=audioCtx.createGain(); g2.gain.value=0.35;
-    const g3=audioCtx.createGain(); g3.gain.value=0.12;
-    // 바람 노이즈
-    const bufSize=audioCtx.sampleRate*0.5;
-    const buf=audioCtx.createBuffer(1,bufSize,audioCtx.sampleRate);
-    const d=buf.getChannelData(0);
-    for(let i=0;i<bufSize;i++)d[i]=(Math.random()*2-1);
-    const noise=audioCtx.createBufferSource();
-    noise.buffer=buf; noise.loop=true;
-    const noiseFilter=audioCtx.createBiquadFilter();
-    noiseFilter.type='bandpass'; noiseFilter.frequency.value=800; noiseFilter.Q.value=0.8;
-    const noiseGain=audioCtx.createGain(); noiseGain.gain.value=0.06;
-    noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(gainNode);
-    noise.start();
-    lfoGain.connect(osc1.frequency);
-    osc1.connect(gainNode);
-    osc2.connect(g2); g2.connect(gainNode);
-    osc3.connect(g3); g3.connect(gainNode);
-    osc1.start(); osc2.start(); osc3.start();
-    instNodes=[osc1,osc2,osc3,noise,g2,g3,noiseGain,noiseFilter];
-    instNodes._oscs=[osc1,osc2,osc3];
-
-  }else if(inst==='synth'){
-    const osc1=audioCtx.createOscillator();
-    osc1.type='sine'; osc1.frequency.value=261.6;
-    const osc2=audioCtx.createOscillator();
-    osc2.type='triangle'; osc2.frequency.value=130.8;
-    const filter=audioCtx.createBiquadFilter();
-    filter.type='lowpass'; filter.frequency.value=2000; filter.Q.value=1.2;
-    lfoGain.connect(osc1.frequency);
-    osc1.connect(filter); osc2.connect(filter); filter.connect(gainNode);
-    osc1.start(); osc2.start();
-    instNodes=[osc1,osc2,filter];
-    instNodes._oscs=[osc1,osc2];
-
-  }else if(inst==='piano'){
-    // 피아노: 어택 빠르고 감쇠, 배음 풍부
-    const oscs=[];
-    const ratios=[1,2,3,4.2,5.4];
-    const amps=[0.5,0.25,0.12,0.06,0.03];
-    const merger=audioCtx.createGain(); merger.gain.value=1;
-    merger.connect(gainNode);
-    ratios.forEach((r,i)=>{
-      const o=audioCtx.createOscillator();
-      o.type='sine'; o.frequency.value=261.6*r;
-      const g=audioCtx.createGain(); g.gain.value=amps[i];
-      o.connect(g); g.connect(merger); o.start();
-      oscs.push(o); instNodes.push(o,g);
-    });
-    instNodes._oscs=oscs;
-    instNodes.push(merger);
-
-  }else if(inst==='flute'){
-    const osc1=audioCtx.createOscillator();
-    osc1.type='sine'; osc1.frequency.value=523;
-    const osc2=audioCtx.createOscillator();
-    osc2.type='sine'; osc2.frequency.value=1046;
-    const g2=audioCtx.createGain(); g2.gain.value=0.2;
-    const filter=audioCtx.createBiquadFilter();
-    filter.type='lowpass'; filter.frequency.value=3000;
-    lfoGain.connect(osc1.frequency);
-    osc1.connect(filter); osc2.connect(g2); g2.connect(filter); filter.connect(gainNode);
-    osc1.start(); osc2.start();
-    instNodes=[osc1,osc2,g2,filter];
-    instNodes._oscs=[osc1,osc2];
-
-  }else if(inst==='violin'){
-    const oscs=[];
-    const ratios=[1,2,3,4,5,6];
-    const amps=[0.4,0.3,0.2,0.15,0.08,0.04];
-    const merger=audioCtx.createGain(); merger.gain.value=1;
-    const filter=audioCtx.createBiquadFilter();
-    filter.type='peaking'; filter.frequency.value=2000; filter.gain.value=6;
-    merger.connect(filter); filter.connect(gainNode);
-    ratios.forEach((r,i)=>{
-      const o=audioCtx.createOscillator();
-      o.type= i===0?'sawtooth':'sine';
-      o.frequency.value=261.6*r;
-      const g=audioCtx.createGain(); g.gain.value=amps[i];
-      o.connect(g); g.connect(merger); o.start();
-      oscs.push(o); instNodes.push(o,g);
-    });
-    lfoGain.connect(oscs[0].frequency);
-    instNodes._oscs=oscs;
-    instNodes.push(merger,filter);
-
-  }else if(inst==='organ'){
-    const oscs=[];
-    const ratios=[1,2,3,4,6,8];
-    const amps=[0.3,0.3,0.2,0.1,0.07,0.04];
-    const merger=audioCtx.createGain(); merger.gain.value=1;
-    merger.connect(gainNode);
-    ratios.forEach((r,i)=>{
-      const o=audioCtx.createOscillator();
-      o.type='sine'; o.frequency.value=130.8*r;
-      const g=audioCtx.createGain(); g.gain.value=amps[i];
-      o.connect(g); g.connect(merger); o.start();
-      oscs.push(o); instNodes.push(o,g);
-    });
-    instNodes._oscs=oscs;
-    instNodes.push(merger);
-
-  }else if(inst==='bell'){
-    const oscs=[];
-    const ratios=[1,2.756,5.404,8.933,13.346];
-    const amps=[0.4,0.25,0.15,0.08,0.04];
-    const merger=audioCtx.createGain(); merger.gain.value=1;
-    merger.connect(gainNode);
-    ratios.forEach((r,i)=>{
-      const o=audioCtx.createOscillator();
-      o.type='sine'; o.frequency.value=261.6*r;
-      const g=audioCtx.createGain(); g.gain.value=amps[i];
-      o.connect(g); g.connect(merger); o.start();
-      oscs.push(o); instNodes.push(o,g);
-    });
-    instNodes._oscs=oscs;
-    instNodes.push(merger);
-
-  }else if(inst==='guitar'){
-    const osc1=audioCtx.createOscillator();
-    osc1.type='sawtooth'; osc1.frequency.value=196;
-    const osc2=audioCtx.createOscillator();
-    osc2.type='sine'; osc2.frequency.value=392;
-    const g2=audioCtx.createGain(); g2.gain.value=0.3;
-    const filter=audioCtx.createBiquadFilter();
-    filter.type='lowpass'; filter.frequency.value=1800; filter.Q.value=2;
-    osc1.connect(filter); osc2.connect(g2); g2.connect(filter); filter.connect(gainNode);
-    osc1.start(); osc2.start();
-    instNodes=[osc1,osc2,g2,filter];
-    instNodes._oscs=[osc1,osc2];
+// Tone.js Sampler URL 매핑
+const SAMPLER_URLS = {
+  piano: {
+    baseUrl:'https://tonejs.github.io/audio/salamander/',
+    urls:{'A0':'A0.mp3','C1':'C1.mp3','Eb1':'Ds1.mp3','F#1':'Fs1.mp3','A1':'A1.mp3','C2':'C2.mp3','Eb2':'Ds2.mp3','F#2':'Fs2.mp3','A2':'A2.mp3','C3':'C3.mp3','Eb3':'Ds3.mp3','F#3':'Fs3.mp3','A3':'A3.mp3','C4':'C4.mp3','Eb4':'Ds4.mp3','F#4':'Fs4.mp3','A4':'A4.mp3','C5':'C5.mp3','Eb5':'Ds5.mp3','F#5':'Fs5.mp3','A5':'A5.mp3','C6':'C6.mp3','Eb6':'Ds6.mp3','F#6':'Fs6.mp3','A6':'A6.mp3','C7':'C7.mp3'}
+  },
+  violin: {
+    baseUrl:'https://tonejs.github.io/audio/violin/',
+    urls:{'A3':'A3.mp3','A4':'A4.mp3','A5':'A5.mp3','A6':'A6.mp3','Ab4':'Ab4.mp3','Ab5':'Ab5.mp3','B3':'B3.mp3','B4':'B4.mp3','B5':'B5.mp3','B6':'B6.mp3','Bb3':'Bb3.mp3','Bb4':'Bb4.mp3','Bb5':'Bb5.mp3','C4':'C4.mp3','C5':'C5.mp3','C6':'C6.mp3','C7':'C7.mp3','D4':'D4.mp3','D5':'D5.mp3','D6':'D6.mp3','Db4':'Db4.mp3','Db5':'Db5.mp3','Db6':'Db6.mp3','E4':'E4.mp3','E5':'E5.mp3','E6':'E6.mp3','Eb4':'Eb4.mp3','Eb5':'Eb5.mp3','F4':'F4.mp3','F5':'F5.mp3','F6':'F6.mp3','G3':'G3.mp3','G4':'G4.mp3','G5':'G5.mp3','G6':'G6.mp3'}
+  },
+  flute: {
+    baseUrl:'https://tonejs.github.io/audio/flute/',
+    urls:{'A4':'A4.mp3','A5':'A5.mp3','A6':'A6.mp3','B4':'B4.mp3','B5':'B5.mp3','C4':'C4.mp3','C5':'C5.mp3','C6':'C6.mp3','C7':'C7.mp3','D4':'D4.mp3','D5':'D5.mp3','D6':'D6.mp3','E4':'E4.mp3','E5':'E5.mp3','E6':'E6.mp3','F4':'F4.mp3','F5':'F5.mp3','F6':'F6.mp3','G4':'G4.mp3','G5':'G5.mp3','G6':'G6.mp3'}
+  },
+  cello: {
+    baseUrl:'https://tonejs.github.io/audio/cello/',
+    urls:{'A2':'A2.mp3','A3':'A3.mp3','A4':'A4.mp3','B2':'B2.mp3','B3':'B3.mp3','B4':'B4.mp3','C2':'C2.mp3','C3':'C3.mp3','C4':'C4.mp3','C5':'C5.mp3','D2':'D2.mp3','D3':'D3.mp3','D4':'D4.mp3','E2':'E2.mp3','E3':'E3.mp3','E4':'E4.mp3','F2':'F2.mp3','F3':'F3.mp3','F4':'F4.mp3','G2':'G2.mp3','G3':'G3.mp3','G4':'G4.mp3'}
+  },
+  guitar: {
+    baseUrl:'https://tonejs.github.io/audio/guitar-acoustic/',
+    urls:{'A2':'A2.mp3','A3':'A3.mp3','A4':'A4.mp3','B2':'B2.mp3','B3':'B3.mp3','B4':'B4.mp3','C3':'C3.mp3','C4':'C4.mp3','C5':'C5.mp3','D2':'D2.mp3','D3':'D3.mp3','D4':'D4.mp3','D5':'D5.mp3','E2':'E2.mp3','E3':'E3.mp3','E4':'E4.mp3','F2':'F2.mp3','F3':'F3.mp3','F4':'F4.mp3','G2':'G2.mp3','G3':'G3.mp3','G4':'G4.mp3'}
+  },
+  organ: {
+    baseUrl:'https://tonejs.github.io/audio/organ/',
+    urls:{'C3':'C3.mp3','C4':'C4.mp3','C5':'C5.mp3','C6':'C6.mp3','Db3':'Db3.mp3','Db4':'Db4.mp3','Db5':'Db5.mp3','Db6':'Db6.mp3','D3':'D3.mp3','D4':'D4.mp3','D5':'D5.mp3','Eb3':'Eb3.mp3','Eb4':'Eb4.mp3','Eb5':'Eb5.mp3','E3':'E3.mp3','E4':'E4.mp3','E5':'E5.mp3','F3':'F3.mp3','F4':'F4.mp3','F5':'F5.mp3','Gb3':'Gb3.mp3','Gb4':'Gb4.mp3','Gb5':'Gb5.mp3','G3':'G3.mp3','G4':'G4.mp3','G5':'G5.mp3','Ab3':'Ab3.mp3','Ab4':'Ab4.mp3','Ab5':'Ab5.mp3','A3':'A3.mp3','A4':'A4.mp3','A5':'A5.mp3','Bb3':'Bb3.mp3','Bb4':'Bb4.mp3','Bb5':'Bb5.mp3','B3':'B3.mp3','B4':'B4.mp3','B5':'B5.mp3'}
   }
-}
+};
 
-function setFreqAll(freq){
-  if(!instNodes||!instNodes._oscs)return;
-  instNodes._oscs.forEach((o,i)=>{
-    const ratios={
-      danso:[1,2,3], synth:[1,0.5], piano:[1,2,3,4.2,5.4],
-      flute:[1,2], violin:[1,2,3,4,5,6], organ:[1,2,3,4,6,8],
-      bell:[1,2.756,5.404,8.933,13.346], guitar:[1,2]
-    }[currentInst]||[1];
-    const r=ratios[i]||1;
-    o.frequency.setTargetAtTime(freq*r, audioCtx.currentTime, 0.04);
+async function loadSampler(inst){
+  if(samplerCache[inst]) return samplerCache[inst];
+  const cfg=SAMPLER_URLS[inst];
+  if(!cfg) return null;
+  return new Promise(resolve=>{
+    const s=new Tone.Sampler({urls:cfg.urls, baseUrl:cfg.baseUrl,
+      onload:()=>{ samplerCache[inst]=s; resolve(s); }
+    }).toDestination();
   });
-  // 단소 노이즈 필터도 주파수 따라 이동
-  if(currentInst==='danso'){
-    const nf=instNodes[3]; // noiseFilter
-    if(nf&&nf.frequency)nf.frequency.setTargetAtTime(freq*1.5,audioCtx.currentTime,0.05);
-  }
 }
 
-function updateAudio(vol,pit,vib){
-  if(!audioCtx)return;
-  const now=audioCtx.currentTime;
-  const freq=getFreqAt(pit);
-  setFreqAll(freq);
-  gainNode.gain.setTargetAtTime(soundActive?(vol/100)*0.5:0,now,0.08);
-  lfoGain.gain.setTargetAtTime((vib/100)*freq*0.035,now,0.05);
+// ── 단소 전자음 (Web Audio API) ─────────────────────
+let audioCtx2=null, dansoGain=null, dansoLfo=null, dansoLfoGain=null;
+let dansoOscs=[];
+
+function initDanso(){
+  if(!audioCtx2){
+    audioCtx2=new(window.AudioContext||window.webkitAudioContext)();
+  }
+  // 기존 단소 노드 정리
+  dansoOscs.forEach(o=>{try{o.stop();o.disconnect();}catch(e){}});
+  dansoOscs=[];
+  if(dansoGain){try{dansoGain.disconnect();}catch(e){}}
+  if(dansoLfo){try{dansoLfo.stop();dansoLfo.disconnect();}catch(e){}}
+
+  dansoGain=audioCtx2.createGain(); dansoGain.gain.value=0;
+  dansoGain.connect(audioCtx2.destination);
+
+  dansoLfo=audioCtx2.createOscillator(); dansoLfo.type='sine'; dansoLfo.frequency.value=5.5;
+  dansoLfoGain=audioCtx2.createGain(); dansoLfoGain.gain.value=0;
+  dansoLfo.connect(dansoLfoGain); dansoLfo.start();
+
+  // 단소: 기본음 + 2배음 + 3배음 + 바람 노이즈
+  const osc1=audioCtx2.createOscillator(); osc1.type='sine'; osc1.frequency.value=530;
+  const osc2=audioCtx2.createOscillator(); osc2.type='sine'; osc2.frequency.value=1060;
+  const osc3=audioCtx2.createOscillator(); osc3.type='sine'; osc3.frequency.value=1590;
+  const g2=audioCtx2.createGain(); g2.gain.value=0.3;
+  const g3=audioCtx2.createGain(); g3.gain.value=0.1;
+
+  const bufSize=audioCtx2.sampleRate*0.5;
+  const buf=audioCtx2.createBuffer(1,bufSize,audioCtx2.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<bufSize;i++) d[i]=(Math.random()*2-1);
+  const noise=audioCtx2.createBufferSource(); noise.buffer=buf; noise.loop=true;
+  const nf=audioCtx2.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=900; nf.Q.value=0.9;
+  const ng=audioCtx2.createGain(); ng.gain.value=0.05;
+  noise.connect(nf); nf.connect(ng); ng.connect(dansoGain); noise.start();
+
+  dansoLfoGain.connect(osc1.frequency);
+  osc1.connect(dansoGain); osc2.connect(g2); g2.connect(dansoGain);
+  osc3.connect(g3); g3.connect(dansoGain);
+  osc1.start(); osc2.start(); osc3.start();
+  dansoOscs=[osc1,osc2,osc3];
+}
+
+function setDansoFreq(freq){
+  if(!dansoOscs.length) return;
+  const now=audioCtx2.currentTime;
+  dansoOscs[0].frequency.setTargetAtTime(freq,now,0.04);
+  dansoOscs[1].frequency.setTargetAtTime(freq*2,now,0.04);
+  dansoOscs[2].frequency.setTargetAtTime(freq*3,now,0.04);
+}
+
+// 노트명 → 주파수
+function noteToFreq(note){
+  return Tone.Frequency(note).toFrequency();
+}
+
+// ── 상태 ─────────────────────────────────────────────
+let volume=60, pitch=50, vibration=50;
+let soundActive=false, silenceTimer=null;
+let currentNote='D4';
+let isLoading=false;
+
+// ── 소리 재생/업데이트 ────────────────────────────────
+let lastNote='';
+function updateSound(){
+  const note=getNoteAt(pitch);
+  const freq=noteToFreq(note);
+
+  if(currentInst==='danso'){
+    if(!dansoGain) return;
+    const now=audioCtx2.currentTime;
+    setDansoFreq(freq);
+    dansoGain.gain.setTargetAtTime(soundActive?(volume/100)*0.5:0, now, 0.08);
+    dansoLfoGain.gain.setTargetAtTime((vibration/100)*freq*0.03, now, 0.05);
+  } else {
+    if(!activeSampler) return;
+    Tone.getDestination().volume.rampTo(Tone.gainToDb((volume/100)*0.9), 0.1);
+    if(soundActive){
+      if(note!==lastNote){
+        activeSampler.triggerRelease(lastNote||note);
+        activeSampler.triggerAttack(note, Tone.now(), 0.8);
+        lastNote=note;
+      }
+      // 비브라토: detune으로 흔들기
+      if(activeSampler._buffers){
+        // Tone.js 비브라토는 별도 이펙트로
+      }
+    } else {
+      if(lastNote){ activeSampler.triggerRelease(lastNote); lastNote=''; }
+    }
+  }
   document.getElementById('soundDot').className='sound-dot'+(soundActive?' on':'');
 }
 
-// ── UI ────────────────────────────────────────────
-let volume=60,pitch=50,vibration=50,animPhase=0;
+// ── 악기 전환 ─────────────────────────────────────────
+async function switchInstrument(inst){
+  if(isLoading) return;
+  currentInst=inst;
+
+  // 기존 소리 끊기
+  if(activeSampler && lastNote){ activeSampler.triggerRelease(lastNote); lastNote=''; }
+  activeSampler=null;
+
+  if(inst==='danso'){
+    initDanso();
+    setInstLabel();
+    return;
+  }
+
+  // 샘플러 로드
+  isLoading=true;
+  document.querySelectorAll('.inst-btn').forEach(b=>b.disabled=true);
+  document.getElementById('loadBar').style.width='30%';
+  document.getElementById('statusBar').textContent='샘플 로딩 중...';
+
+  try{
+    activeSampler=await loadSampler(inst);
+    document.getElementById('loadBar').style.width='100%';
+    setTimeout(()=>document.getElementById('loadBar').style.width='0%',400);
+    document.getElementById('statusBar').textContent='손을 카메라에 보여주세요';
+  }catch(e){
+    document.getElementById('statusBar').textContent='로딩 실패 — 다시 시도';
+  }
+  isLoading=false;
+  document.querySelectorAll('.inst-btn').forEach(b=>b.disabled=false);
+  setInstLabel();
+}
+
+function setInstLabel(){
+  const names={danso:'단소',piano:'피아노',violin:'바이올린',flute:'플루트',cello:'첼로',guitar:'기타',organ:'오르간'};
+  const sn={korean:'국악',western:'서양'};
+  const el=document.getElementById('instLabel');
+  if(el) el.textContent=(names[currentInst]||currentInst)+' · '+sn[currentScale];
+}
+
+// ── UI ───────────────────────────────────────────────
+let animPhase=0;
 const vibBars=[];
 const vibRing=document.getElementById('vibRing');
 for(let i=0;i<20;i++){
-  const b=document.createElement('div');
-  b.className='vib-bar';b.style.height='4px';
-  vibRing.appendChild(b);vibBars.push(b);
+  const b=document.createElement('div'); b.className='vib-bar'; b.style.height='4px';
+  vibRing.appendChild(b); vibBars.push(b);
 }
 function animVib(){
   animPhase+=0.12;
@@ -369,52 +337,46 @@ function updateUI(){
   document.getElementById('cardPitch').textContent=lbl;
   document.getElementById('cardVib').textContent=Math.round(vibration)+'%';
 }
-function updateInstLabel(){
-  const names={danso:'단소',synth:'신디',piano:'피아노',flute:'플루트',violin:'바이올린',organ:'오르간',bell:'벨',guitar:'기타'};
-  const scaleNames={korean:'국악',western:'서양'};
-  document.getElementById('instLabel').textContent=(names[currentInst]||currentInst)+' · '+(scaleNames[currentScale]);
-}
 
 // 악기 버튼
-document.getElementById('instRow').addEventListener('click',e=>{
+document.getElementById('instRow').addEventListener('click',async e=>{
   const btn=e.target.closest('.inst-btn');
-  if(!btn)return;
+  if(!btn||isLoading) return;
   document.querySelectorAll('.inst-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  currentInst=btn.dataset.inst;
-  if(audioCtx)buildInstrument(currentInst);
-  updateInstLabel();
+  await switchInstrument(btn.dataset.inst);
 });
 
 // 음계 버튼
 document.querySelector('.scale-row').addEventListener('click',e=>{
   const btn=e.target.closest('.scale-btn');
-  if(!btn)return;
+  if(!btn) return;
   document.querySelectorAll('.scale-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   currentScale=btn.dataset.scale;
-  updateInstLabel();
+  lastNote='';
+  setInstLabel();
   updateUI();
 });
 
+// ── 손 인식 ──────────────────────────────────────────
 function getSpread(lm){
-  const w=lm[0];let max=0;
+  const w=lm[0]; let max=0;
   [4,8,12,16,20].forEach(i=>{
-    const dx=lm[i].x-w.x,dy=lm[i].y-w.y;
+    const dx=lm[i].x-w.x, dy=lm[i].y-w.y;
     max=Math.max(max,Math.sqrt(dx*dx+dy*dy));
   });
   return Math.min(max*3,1);
 }
 function drawHand(lm,color){
-  const W=overlayCanvas.width,H=overlayCanvas.height;
+  const W=overlayCanvas.width, H=overlayCanvas.height;
   const conn=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
-  ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineCap='round';
+  ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.lineCap='round';
   conn.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(lm[a].x*W,lm[a].y*H);ctx.lineTo(lm[b].x*W,lm[b].y*H);ctx.stroke();});
   lm.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x*W,p.y*H,i===0?7:4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();});
 }
 function lerp(a,b,t){return a+(b-a)*t;}
 
-// ── Camera ────────────────────────────────────────
 const startBtn=document.getElementById('startBtn');
 const camVideo=document.getElementById('camVideo');
 const overlayCanvas=document.getElementById('overlayCanvas');
@@ -423,7 +385,11 @@ const ctx=overlayCanvas.getContext('2d');
 startBtn.addEventListener('click',async()=>{
   startBtn.textContent='연결 중...';
   startBtn.disabled=true;
-  initAudio();
+
+  // Tone.js 시작 (사용자 인터랙션 필요)
+  await Tone.start();
+  // 단소 기본 초기화
+  initDanso();
 
   let stream;
   try{
@@ -440,25 +406,25 @@ startBtn.addEventListener('click',async()=>{
   document.getElementById('mainStage').style.display='block';
   document.getElementById('infoRow').style.display='grid';
   startBtn.style.display='none';
-  overlayCanvas.width=480;
-  overlayCanvas.height=360;
-  updateInstLabel();
+  overlayCanvas.width=480; overlayCanvas.height=360;
+  setInstLabel();
 
   const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-  hands.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.7,minTrackingConfidence:0.5});
+  hands.setOptions({maxNumHands:2, modelComplexity:0, minDetectionConfidence:0.7, minTrackingConfidence:0.5});
 
   hands.onResults(results=>{
     ctx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
     const statusBar=document.getElementById('statusBar');
     if(!results.multiHandLandmarks||results.multiHandLandmarks.length===0){
-      statusBar.textContent='손을 카메라에 보여주세요';
+      if(!isLoading) statusBar.textContent='손을 카메라에 보여주세요';
       if(soundActive&&!silenceTimer){
-        silenceTimer=setTimeout(()=>{soundActive=false;updateAudio(volume,pitch,vibration);silenceTimer=null;},400);
+        silenceTimer=setTimeout(()=>{soundActive=false;updateSound();silenceTimer=null;},400);
       }
       return;
     }
     if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
     soundActive=true;
+
     let parts=[];
     results.multiHandLandmarks.forEach((lm,idx)=>{
       const label=results.multiHandedness[idx].label;
@@ -474,8 +440,8 @@ startBtn.addEventListener('click',async()=>{
         parts.push('왼손 — 볼륨');
       }
     });
-    statusBar.textContent=parts.join('  |  ');
-    updateAudio(volume,pitch,vibration);
+    if(!isLoading) statusBar.textContent=parts.join('  |  ');
+    updateSound();
     updateUI();
   });
 
@@ -483,10 +449,10 @@ startBtn.addEventListener('click',async()=>{
   const camera=new Camera(camVideo,{
     onFrame:async()=>{
       frameCount++;
-      if(frameCount%3!==0)return;
+      if(frameCount%3!==0) return;
       await hands.send({image:camVideo});
     },
-    width:640,height:480
+    width:640, height:480
   });
   camera.start();
 });
