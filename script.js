@@ -6,15 +6,24 @@ const SCALES = {
   },
   western: {
     labels:['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5'],
+    solfege:['도','레','미','파','솔','라','시','도','레','미','파','솔','라','시','도','레','미','파','솔','라'],
     notes: ['C3','D3','E3','F3','G3','A3','B3','C4','D4','E4','F4','G4','A4','B4','C5','D5','E5','F5','G5','A5']
   }
 };
 let currentScale='korean', currentInst='danso';
 
 // ── 녹음 상태 ─────────────────────────────────────────
-let recDest=null, recBridgeGain=null;
+let recDest=null, recBridgeGain=null;         // 루프 녹음용 (라이브 연주만)
+let fullRecDest=null, fullRecBridgeGain=null; // 저장용 (루프+연주 전체)
 let mediaRecorder=null, recChunks=[], recBlobUrl=null;
 let isRecording=false, recStartTime=0, recTimerId=null;
+
+// ── 루프 스테이션 상태 ───────────────────────────────
+let loopDuration=0, loopStartCtxTime=0;
+let loopSources=[], loopLayerCount=0;
+let isLoopRecording=false;
+let loopRecorder=null, loopRecChunks=[], loopRecStartTime=0, loopRecTimerId=null;
+const MAX_LOOP_LAYERS=3;
 
 function getNoteAt(pct){
   const arr=SCALES[currentScale].notes;
@@ -23,6 +32,16 @@ function getNoteAt(pct){
 function getLabelAt(pct){
   const arr=SCALES[currentScale].labels;
   return arr[Math.min(Math.max(Math.round((pct/100)*(arr.length-1)),0),arr.length-1)];
+}
+function getSolfegeAt(pct){
+  const arr=SCALES[currentScale].solfege;
+  if(!arr) return getLabelAt(pct);
+  return arr[Math.min(Math.max(Math.round((pct/100)*(arr.length-1)),0),arr.length-1)];
+}
+function snapToNote(pct){
+  const n=SCALES[currentScale].notes.length;
+  const idx=Math.max(0,Math.min(n-1,Math.round((pct/100)*(n-1))));
+  return Math.round((idx/(n-1))*100);
 }
 
 // ── Tone.js 샘플러 캐시 ──────────────────────────────
@@ -63,7 +82,7 @@ async function loadSampler(inst){
   if(!cfg) return null;
   return new Promise(resolve=>{
     const s=new Tone.Sampler({urls:cfg.urls, baseUrl:cfg.baseUrl,
-      onload:()=>{ samplerCache[inst]=s; if(recBridgeGain) s.connect(recBridgeGain); resolve(s); }
+      onload:()=>{ samplerCache[inst]=s; if(recBridgeGain) s.connect(recBridgeGain); if(fullRecBridgeGain) s.connect(fullRecBridgeGain); resolve(s); }
     }).toDestination();
   });
 }
@@ -82,6 +101,7 @@ function initDanso(){
   dansoGain=audioCtx2.createGain(); dansoGain.gain.value=0;
   dansoGain.connect(audioCtx2.destination);
   if(recBridgeGain) dansoGain.connect(recBridgeGain);
+  if(fullRecBridgeGain) dansoGain.connect(fullRecBridgeGain);
 
   dansoLfo=audioCtx2.createOscillator(); dansoLfo.type='sine'; dansoLfo.frequency.value=5.5;
   dansoLfoGain=audioCtx2.createGain(); dansoLfoGain.gain.value=0;
@@ -193,13 +213,16 @@ function setupRecording(){
   recDest=rawCtx.createMediaStreamDestination();
   recBridgeGain=rawCtx.createGain();
   recBridgeGain.connect(recDest);
+  fullRecDest=rawCtx.createMediaStreamDestination();
+  fullRecBridgeGain=rawCtx.createGain();
+  fullRecBridgeGain.connect(fullRecDest);
 }
 
 function startRecording(){
-  if(!recDest||isRecording) return;
+  if(!fullRecDest||isRecording) return;
   recChunks=[];
   if(recBlobUrl){URL.revokeObjectURL(recBlobUrl);recBlobUrl=null;}
-  mediaRecorder=new MediaRecorder(recDest.stream);
+  mediaRecorder=new MediaRecorder(fullRecDest.stream);
   mediaRecorder.ondataavailable=e=>{if(e.data.size>0) recChunks.push(e.data);};
   mediaRecorder.onstop=()=>{
     const blob=new Blob(recChunks,{type:'audio/webm'});
@@ -229,6 +252,87 @@ function stopRecording(){
   document.getElementById('recBtn').classList.remove('recording');
 }
 
+// ── 루프 스테이션 ────────────────────────────────────
+function startLoopRecording(){
+  loopRecStartTime=Date.now();
+  loopRecChunks=[];
+  const mimeType=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm']
+    .find(t=>MediaRecorder.isTypeSupported(t))||'';
+  loopRecorder=new MediaRecorder(recDest.stream, mimeType?{mimeType}:{});
+  loopRecorder.ondataavailable=e=>{if(e.data.size>0) loopRecChunks.push(e.data);};
+  loopRecorder.start();
+  isLoopRecording=true;
+  loopRecTimerId=setInterval(()=>{
+    const s=Math.floor((Date.now()-loopRecStartTime)/1000);
+    document.getElementById('loopStatus').textContent=
+      '녹음 '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+  },200);
+  document.getElementById('loopBtn').textContent='⏹ 완성';
+  document.getElementById('loopBtn').classList.add('loop-rec');
+}
+
+async function finishLoopRecording(){
+  clearInterval(loopRecTimerId);
+  isLoopRecording=false;
+  return new Promise(resolve=>{
+    loopRecorder.onstop=async()=>{
+      const blob=new Blob(loopRecChunks);
+      try{
+        const buf=await blob.arrayBuffer();
+        const audioBuf=await Tone.context.rawContext.decodeAudioData(buf);
+        resolve(audioBuf);
+      }catch(e){ console.warn('loop decode:',e); resolve(null); }
+    };
+    loopRecorder.stop();
+  });
+}
+
+function addLoopLayer(audioBuf){
+  if(!audioBuf) return;
+  const rawCtx=Tone.context.rawContext;
+  if(loopSources.length===0){
+    loopDuration=audioBuf.duration;
+    loopStartCtxTime=rawCtx.currentTime;
+  }
+  const elapsed=rawCtx.currentTime-loopStartCtxTime;
+  const phase=loopDuration>0?elapsed%loopDuration:0;
+  const g=rawCtx.createGain(); g.gain.value=0.85;
+  const src=rawCtx.createBufferSource();
+  src.buffer=audioBuf; src.loop=true; src.loopEnd=loopDuration;
+  src.connect(g);
+  g.connect(rawCtx.destination);
+  if(fullRecBridgeGain) g.connect(fullRecBridgeGain);
+  src.start(rawCtx.currentTime, phase);
+  loopSources.push({src,g});
+  loopLayerCount++;
+  updateLoopUI();
+}
+
+function clearLoop(){
+  loopSources.forEach(({src,g})=>{try{src.stop();src.disconnect();g.disconnect();}catch(e){}});
+  loopSources=[];loopLayerCount=0;loopDuration=0;loopStartCtxTime=0;
+  updateLoopUI();
+}
+
+function updateLoopUI(){
+  const btn=document.getElementById('loopBtn');
+  const clr=document.getElementById('loopClearBtn');
+  const lyr=document.getElementById('loopLayerTxt');
+  const sts=document.getElementById('loopStatus');
+  if(loopLayerCount===0){
+    btn.textContent='⏺ 루프 녹음'; btn.disabled=false; clr.disabled=true;
+    lyr.textContent=''; sts.textContent='대기중';
+  } else if(loopLayerCount<MAX_LOOP_LAYERS){
+    btn.textContent='⏺ 레이어 추가'; btn.disabled=false; clr.disabled=false;
+    lyr.textContent='레이어 '+loopLayerCount+'/'+MAX_LOOP_LAYERS;
+    if(!isLoopRecording) sts.textContent='루프 재생 중';
+  } else {
+    btn.textContent='레이어 최대'; btn.disabled=true; clr.disabled=false;
+    lyr.textContent='레이어 '+loopLayerCount+'/'+MAX_LOOP_LAYERS;
+    sts.textContent='루프 재생 중';
+  }
+}
+
 function setInstLabel(){
   const names={danso:'단소',piano:'피아노',violin:'바이올린',flute:'플루트',cello:'첼로',guitar:'기타',organ:'오르간'};
   const sn={korean:'국악',western:'서양'};
@@ -250,6 +354,11 @@ function animVib(){
     const w=Math.sin(animPhase*3+i*0.6)*0.5+0.5;
     b.style.height=Math.round(4+w*(vibration/100)*44)+'px';
   });
+  if(loopDuration>0&&loopStartCtxTime>0&&Tone.context){
+    const pct=((Tone.context.rawContext.currentTime-loopStartCtxTime)%loopDuration/loopDuration)*100;
+    const el=document.getElementById('loopBar');
+    if(el) el.style.width=pct+'%';
+  }
   requestAnimationFrame(animVib);
 }
 animVib();
@@ -259,9 +368,10 @@ function updateUI(){
   document.getElementById('volVal').textContent=Math.round(volume);
   document.getElementById('pitchFill').style.height=pitch+'%';
   const lbl=getLabelAt(pitch);
-  document.getElementById('pitchVal').textContent=lbl;
+  const sol=getSolfegeAt(pitch);
+  document.getElementById('pitchVal').textContent=sol;
   document.getElementById('cardVol').textContent=Math.round(volume)+'%';
-  document.getElementById('cardPitch').textContent=lbl;
+  document.getElementById('cardPitch').textContent=currentScale==='western'? sol+' ('+lbl+')' : lbl;
   document.getElementById('cardVib').textContent=Math.round(vibration)+'%';
 }
 
@@ -332,6 +442,7 @@ startBtn.addEventListener('click',async()=>{
   document.getElementById('mainStage').style.display='block';
   document.getElementById('infoRow').style.display='grid';
   document.getElementById('recRow').style.display='flex';
+  document.getElementById('loopRow').style.display='flex';
   startBtn.style.display='none';
   overlayCanvas.width=480; overlayCanvas.height=360;
   setInstLabel();
@@ -358,7 +469,7 @@ startBtn.addEventListener('click',async()=>{
       const wristY=lm[0].y;
       if(label==='Left'){
         drawHand(lm,'#9FE1CB');
-        pitch=Math.round(lerp(pitch,Math.min(Math.max((1-wristY)*100,0),100),0.2));
+        pitch=snapToNote(lerp(pitch,Math.min(Math.max((1-wristY)*100,0),100),0.15));
         vibration=Math.round(lerp(vibration,getSpread(lm)*100,0.2));
         parts.push('오른손 — 음역대·진동');
       }else{
@@ -398,3 +509,18 @@ document.getElementById('dlBtn').addEventListener('click',()=>{
   a.download='visual-dj-'+new Date().toISOString().slice(0,19).replace(/[:.]/g,'-')+'.webm';
   a.click();
 });
+
+// ── 루프 버튼 이벤트 ─────────────────────────────────
+document.getElementById('loopBtn').addEventListener('click',async()=>{
+  if(!recDest) return;
+  if(!isLoopRecording){
+    if(loopLayerCount>=MAX_LOOP_LAYERS) return;
+    startLoopRecording();
+  } else {
+    document.getElementById('loopBtn').disabled=true;
+    document.getElementById('loopBtn').classList.remove('loop-rec');
+    const buf=await finishLoopRecording();
+    addLoopLayer(buf);
+  }
+});
+document.getElementById('loopClearBtn').addEventListener('click',()=>clearLoop());
